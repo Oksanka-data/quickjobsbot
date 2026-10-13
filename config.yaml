@@ -1,0 +1,117 @@
+location:
+  home: "SW16"
+  radius_miles: 5
+
+employment:
+  - "part-time"
+
+transport:
+  max_bus_minutes: 60
+  max_walk_minutes: 40
+
+salary:
+  highlight_from: 14
+  priority_from: 15
+
+exclude_keywords:
+  - cleaner
+  - cleaning
+  - carer
+  - care assistant
+  - support worker
+  - healthcare assistant
+  - chef
+  - head chef
+  - sous chef
+  - cook
+  - kitchen porter
+  - volunteer
+
+agents:
+
+  shops:
+    enabled: true
+
+    keywords:
+      - customer assistant
+      - sales assistant
+      - retail assistant
+      - cashier
+      - checkout assistant
+      - customer advisor
+      - store colleague
+
+    companies:
+      - tesco
+      - sainsburys
+      - marks and spencer
+      - m&s
+      - lidl
+      - aldi
+      - waitrose
+      - co-op
+      - boots
+      - superdrug
+      - whsmith
+
+  premium_retail:
+    enabled: true
+
+    keywords:
+      - sales assistant
+      - sales associate
+      - client advisor
+      - brand ambassador
+      - retail assistant
+
+    companies:
+      - uniqlo
+      - zara
+      - cos
+      - reiss
+      - mango
+      - massimo dutti
+      - arket
+      - rituals
+      - skechers
+      - levi's
+      - kurt geiger
+      - apple
+
+  cafe_restaurants:
+    enabled: true
+
+    keywords:
+      - barista
+      - team member
+      - front of house
+      - counter assistant
+
+    companies:
+      - costa
+      - starbucks
+      - caffe nero
+      - pret
+      - gails
+      - black sheep
+
+  warehouse:
+    enabled: true
+
+    keywords:
+      - stock assistant
+      - stockroom assistant
+      - picker
+      - packer
+      - fulfilment assistant
+
+  easy_jobs:
+    enabled: true
+
+    keywords:
+      - receptionist
+      - cinema assistant
+      - visitor assistant
+      - leisure assistant
+      - front desk
+      - library assistant
