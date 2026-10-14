@@ -1,0 +1,46 @@
+name: QuickJobs
+
+on:
+  schedule:
+    - cron: "0 7 * * *"   # щодня о 07:00 UTC (08:00 влітку / 07:00 взимку за Лондоном)
+  workflow_dispatch:       # можна запустити вручну кнопкою Run workflow
+
+permissions:
+  contents: write          # потрібно, щоб зберегти seen_jobs.json
+
+concurrency:
+  group: quickjobs
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: pip
+
+    - name: Install packages
+      run: pip install -r requirements.txt
+
+    - name: Run bot
+      env:
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        CHAT_ID: ${{ secrets.CHAT_ID }}
+        ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+        ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+        REED_API_KEY: ${{ secrets.REED_API_KEY }}
+      run: python quickjobs.py
+
+    - name: Save list of sent jobs
+      if: always()
+      run: |
+        git config user.name "quickjobs-bot"
+        git config user.email "quickjobs-bot@users.noreply.github.com"
+        git add seen_jobs.json
+        git diff --cached --quiet || (git commit -m "Update seen jobs" && git push)
