@@ -6,19 +6,11 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 message = """
 ✅ QuickJobsBot працює
-
-Категорії:
-
-🛒 Shops
-👔 Premium Retail
-☕ Cafe & Restaurants
-📦 Warehouse
-🎯 Easy Jobs
 """
 
 url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-requests.post(
+response = requests.post(
     url,
     json={
         "chat_id": CHAT_ID,
@@ -26,4 +18,6 @@ requests.post(
     }
 )
 
-print("Message sent")
+print("STATUS:", response.status_code)
+print("RESPONSE:")
+print(response.text)
