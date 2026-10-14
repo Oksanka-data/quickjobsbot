@@ -4,9 +4,9 @@ import requests
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-message = """
-✅ QuickJobsBot працює
-"""
+print("CHAT_ID =", CHAT_ID)
+
+message = "TEST"
 
 url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
@@ -18,6 +18,5 @@ response = requests.post(
     }
 )
 
-print("STATUS:", response.status_code)
-print("RESPONSE:")
+print(response.status_code)
 print(response.text)
