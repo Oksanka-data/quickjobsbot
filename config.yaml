@@ -18,7 +18,6 @@ exclude_keywords:
   - cleaning
   - carer
   - care assistant
-  - care home
   - support worker
   - healthcare assistant
   - chef
@@ -54,6 +53,33 @@ agents:
     title: "TECH"
     radius_miles: 15        # для технічних вакансій шукаємо ширше
     remote: true            # плюс окремий пошук віддалених вакансій по всій Британії
+    # Пошук Reed шукає слова і в тексті оголошення, тому без цього фільтра в TECH
+    # потрапляють звичайні вакансії. Назва посади МАЄ містити одне зі слів нижче:
+    title_match:
+      - website
+      - web
+      - wordpress
+      - shopify
+      - ppc
+      - google ads
+      - paid media
+      - paid social
+      - paid search
+      - seo
+      - digital marketing
+      - ecommerce
+      - e-commerce
+    # ...і НЕ містити жодного зі слів нижче:
+    title_exclude:
+      - sales assistant
+      - customer assistant
+      - retail assistant
+      - bookkeeper
+      - book keeper
+      - accountant
+      - accounts
+      - cashier
+      - driver
     keywords:
       - website administrator
       - web administrator
@@ -68,7 +94,6 @@ agents:
       - seo executive
       - digital marketing assistant
       - ecommerce assistant
-      - ecommerce
 
   shops:
     enabled: true
