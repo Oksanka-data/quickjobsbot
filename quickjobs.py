@@ -33,13 +33,7 @@ MAX_AGE_DAYS = 7  # не показувати вакансії старші за
 SEEN_KEEP_DAYS = 60  # скільки днів пам'ятати вже надіслані
 TIMEOUT = 20
 
-AGENT_EMOJI = {
-    "shops": "🛒",
-    "premium_retail": "👗",
-    "cafe_restaurants": "☕",
-    "warehouse": "📦",
-    "easy_jobs": "🎟",
-}
+REMOTE_WORDS = (" remote ", " work from home ", " home based ", " homeworking ", " home working ", " wfh ")
 
 HOURLY_RE = re.compile(
     r"£\s?(\d{1,3}(?:\.\d{1,2})?)"
@@ -81,39 +75,44 @@ def parse_hourly(*texts):
 
 
 def salary_info(lo, hi, predicted, title, snippet):
-    """Повертає (hourly | None, текст для показу)."""
+    """Повертає (hourly | None, текст для показу, оцінка_за_годину_з_річної | None)."""
     hourly = parse_hourly(title, snippet)
     if hourly is None and lo and not predicted:
         top = float(hi or lo)
         if top < 100:  # схоже на погодинну ставку
             hourly = top
     if hourly is not None:
-        return hourly, f"£{hourly:.2f}/h".replace(".00/h", "/h")
+        return hourly, f"£{hourly:.2f}/h".replace(".00/h", "/h"), None
     if lo and not predicted:
         lo_i, hi_i = int(lo), int(hi or lo)
-        if lo_i != hi_i:
-            return None, f"£{lo_i:,}–£{hi_i:,}/yr"
-        return None, f"£{lo_i:,}/yr"
-    return None, ""
+        top = max(lo_i, hi_i)
+        rng = f"£{lo_i:,}–£{hi_i:,}" if lo_i != hi_i else f"£{lo_i:,}"
+        if top >= 8000:  # річна зарплата (повний робочий тиждень)
+            est = top / 1950 if top <= 200000 else None
+            return None, f"{rng}/yr", est
+        return None, rng, None  # незрозуміла одиниця (наприклад, ставка за день)
+    return None, "", None
 
 
 # ---------- джерела ----------
 
-def fetch_adzuna(keyword: str, cfg: dict) -> list[dict]:
+def fetch_adzuna(keyword: str, cfg: dict, agent: dict, remote: bool = False) -> list[dict]:
     if not (ADZUNA_ID and ADZUNA_KEY):
         return []
     loc = cfg["location"]
+    radius = agent.get("radius_miles", loc.get("radius_miles", 5))
     params = {
         "app_id": ADZUNA_ID,
         "app_key": ADZUNA_KEY,
-        "what": keyword,
-        "where": loc["home"],
-        "distance": max(1, round(loc.get("radius_miles", 5) * 1.609)),  # Adzuna: кілометри
+        "what": keyword + (" remote" if remote else ""),
         "max_days_old": MAX_AGE_DAYS,
         "results_per_page": 50,
         "sort_by": "date",
         "content-type": "application/json",
     }
+    if not remote:
+        params["where"] = loc["home"]
+        params["distance"] = max(1, round(radius * 1.609))  # Adzuna: кілометри
     if "part-time" in [e.lower() for e in cfg.get("employment", [])]:
         params["part_time"] = 1
     r = requests.get("https://api.adzuna.com/v1/api/jobs/gb/search/1", params=params, timeout=TIMEOUT)
@@ -121,7 +120,7 @@ def fetch_adzuna(keyword: str, cfg: dict) -> list[dict]:
     jobs = []
     for j in r.json().get("results", []):
         title, snippet = clean(j.get("title")), clean(j.get("description"))
-        hourly, sal = salary_info(
+        hourly, sal, est = salary_info(
             j.get("salary_min"), j.get("salary_max"),
             str(j.get("salary_is_predicted", "0")) == "1", title, snippet,
         )
@@ -134,21 +133,21 @@ def fetch_adzuna(keyword: str, cfg: dict) -> list[dict]:
             "key": f"adzuna:{j['id']}", "title": title,
             "company": clean((j.get("company") or {}).get("display_name")),
             "location": clean((j.get("location") or {}).get("display_name")),
-            "url": j.get("redirect_url", ""), "hourly": hourly, "salary": sal, "posted": posted,
+            "url": j.get("redirect_url", ""), "hourly": hourly, "est": est, "salary": sal,
+            "posted": posted, "snippet": snippet,
         })
     return jobs
 
 
-def fetch_reed(keyword: str, cfg: dict) -> list[dict]:
+def fetch_reed(keyword: str, cfg: dict, agent: dict, remote: bool = False) -> list[dict]:
     if not REED_KEY:
         return []
     loc = cfg["location"]
-    params = {
-        "keywords": keyword,
-        "locationName": loc["home"],
-        "distanceFromLocation": loc.get("radius_miles", 5),  # Reed: милі
-        "resultsToTake": 50,
-    }
+    radius = agent.get("radius_miles", loc.get("radius_miles", 5))
+    params = {"keywords": keyword + (" remote" if remote else ""), "resultsToTake": 50}
+    if not remote:
+        params["locationName"] = loc["home"]
+        params["distanceFromLocation"] = radius  # Reed: милі
     if "part-time" in [e.lower() for e in cfg.get("employment", [])]:
         params["partTime"] = "true"
     r = requests.get("https://www.reed.co.uk/api/1.0/search", params=params, auth=(REED_KEY, ""), timeout=TIMEOUT)
@@ -156,7 +155,7 @@ def fetch_reed(keyword: str, cfg: dict) -> list[dict]:
     jobs = []
     for j in r.json().get("results", []):
         title, snippet = clean(j.get("jobTitle")), clean(j.get("jobDescription"))
-        hourly, sal = salary_info(j.get("minimumSalary"), j.get("maximumSalary"), False, title, snippet)
+        hourly, sal, est = salary_info(j.get("minimumSalary"), j.get("maximumSalary"), False, title, snippet)
         posted = None
         try:
             posted = datetime.strptime(j["date"], "%d/%m/%Y").replace(tzinfo=timezone.utc)
@@ -165,9 +164,15 @@ def fetch_reed(keyword: str, cfg: dict) -> list[dict]:
         jobs.append({
             "key": f"reed:{j['jobId']}", "title": title,
             "company": clean(j.get("employerName")), "location": clean(j.get("locationName")),
-            "url": j.get("jobUrl", ""), "hourly": hourly, "salary": sal, "posted": posted,
+            "url": j.get("jobUrl", ""), "hourly": hourly, "est": est, "salary": sal,
+            "posted": posted, "snippet": snippet,
         })
     return jobs
+
+
+def remote_ok(job: dict) -> bool:
+    blob = norm_words(" ".join([job["title"], job["location"], job.get("snippet", "")]))
+    return any(w in blob for w in REMOTE_WORDS)
 
 
 def collect(cfg: dict) -> list[dict]:
@@ -179,29 +184,35 @@ def collect(cfg: dict) -> list[dict]:
     found: dict[str, dict] = {}
     calls = errors = 0
     for name, agent in agents.items():
+        modes = [False] + ([True] if agent.get("remote") else [])  # remote: додатковий пошук без прив'язки до району
         for keyword in agent.get("keywords", []):
-            for fetch in (fetch_adzuna, fetch_reed):
-                try:
-                    jobs = fetch(keyword, cfg)
-                except Exception as e:  # не друкуємо текст помилки: у ньому може бути URL із ключем
-                    status = getattr(getattr(e, "response", None), "status_code", "")
-                    log(f"  ! {fetch.__name__} '{keyword}': {type(e).__name__} {status}")
-                    errors += 1
-                    jobs = []
-                else:
-                    calls += 1
-                time.sleep(0.3)
-                for job in jobs:
-                    fp = fingerprint(job)
-                    if fp in found:
-                        found[fp]["keys"].add(job["key"])
-                        continue
-                    job["keys"] = {job["key"]}
-                    job["fp"] = fp
-                    job["agent"] = name
-                    company_n = norm_words(job["company"])
-                    job["brand"] = any(b in company_n for b in all_brands)
-                    found[fp] = job
+            for remote in modes:
+                for fetch in (fetch_adzuna, fetch_reed):
+                    try:
+                        jobs = fetch(keyword, cfg, agent, remote)
+                    except Exception as e:  # не друкуємо текст помилки: у ньому може бути URL із ключем
+                        status = getattr(getattr(e, "response", None), "status_code", "")
+                        log(f"  ! {fetch.__name__} '{keyword}': {type(e).__name__} {status}")
+                        errors += 1
+                        jobs = []
+                    else:
+                        calls += 1
+                    time.sleep(0.3)
+                    for job in jobs:
+                        is_remote = remote_ok(job)
+                        if remote and not is_remote:
+                            continue  # у remote-пошуку лишаємо тільки справжній віддалений формат
+                        fp = fingerprint(job)
+                        if fp in found:
+                            found[fp]["keys"].add(job["key"])
+                            continue
+                        job["keys"] = {job["key"]}
+                        job["fp"] = fp
+                        job["agent"] = name
+                        job["remote"] = is_remote
+                        company_n = norm_words(job["company"])
+                        job["brand"] = any(b in company_n for b in all_brands)
+                        found[fp] = job
     log(f"Запитів виконано: {calls}, помилок: {errors}, унікальних вакансій: {len(found)}")
     if calls == 0:
         raise SystemExit("Жодне джерело не відповіло. Перевірте ключі ADZUNA_* / REED_API_KEY у Secrets.")
@@ -218,6 +229,7 @@ def is_excluded(title: str, words: list[str]) -> bool:
 def select(jobs: list[dict], cfg: dict, seen: dict) -> list[dict]:
     exclude = cfg.get("exclude_keywords", [])
     prio = cfg.get("salary", {}).get("priority_from", 15)
+    order = {n: i for i, n in enumerate(cfg.get("agents") or {})}
     cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_AGE_DAYS)
     out = []
     for j in jobs:
@@ -227,9 +239,11 @@ def select(jobs: list[dict], cfg: dict, seen: dict) -> list[dict]:
             continue
         if j["fp"] in seen or any(k in seen for k in j["keys"]):
             continue
-        j["top"] = bool(j["hourly"] and j["hourly"] >= prio)
+        j["rate"] = j["hourly"] or j["est"] or 0
+        j["top"] = j["rate"] >= prio
         out.append(j)
-    out.sort(key=lambda j: (not j["top"], not j["brand"], -(j["hourly"] or 0)))
+    # спочатку категорії за порядком у config.yaml (tech - перша), всередині - краща оплата та знайомі бренди
+    out.sort(key=lambda j: (order.get(j["agent"], 99), not j["top"], not j["brand"], -j["rate"]))
     return out
 
 
@@ -239,19 +253,43 @@ def esc(text: str) -> str:
     return html.escape(text, quote=False)
 
 
+def plural_jobs(n: int, new: bool = True) -> str:
+    """Українська множина: 1 нова вакансія / 2 нові вакансії / 5 нових вакансій."""
+    if n == 0:
+        return "0 вакансій"
+    n10, n100 = n % 10, n % 100
+    if n10 == 1 and n100 != 11:
+        return f"{n} {'нова ' if new else ''}вакансія"
+    if 2 <= n10 <= 4 and not 12 <= n100 <= 14:
+        return f"{n} {'нові ' if new else ''}вакансії"
+    return f"{n} {'нових ' if new else ''}вакансій"
+
+
+def category_list(cfg: dict) -> list[tuple[str, str, str]]:
+    """[(ключ, емодзі, назва)] у порядку з config.yaml."""
+    out = []
+    for name, a in (cfg.get("agents") or {}).items():
+        if a.get("enabled"):
+            out.append((name, a.get("emoji", "💼"), a.get("title") or name.replace("_", " ").upper()))
+    return out
+
+
 def format_job(j: dict, cfg: dict) -> str:
     high = cfg.get("salary", {}).get("highlight_from", 14)
-    emoji = AGENT_EMOJI.get(j["agent"], "💼")
-    lines = [f"{emoji} <b>{esc(j['title'])}</b>"]
+    lines = [f"<b>{esc(j['title'])}</b>"]
     who = esc(j["company"]) if j["company"] else "—"
     if j["brand"]:
         who += " ⭐"
     lines.append(f"🏢 {who}")
-    if j["location"]:
-        lines.append(f"📍 {esc(j['location'])}")
+    place = esc(j["location"]) if j["location"] else ""
+    if j.get("remote"):
+        place = (place + " · " if place else "") + "🏠 remote/WFH"
+    if place:
+        lines.append(f"📍 {place}")
     if j["salary"]:
-        flag = " 🔥" if j["top"] else (" ✅" if j["hourly"] and j["hourly"] >= high else "")
-        lines.append(f"💷 {esc(j['salary'])}{flag}")
+        flag = " 🔥" if j["top"] else (" ✅" if j["rate"] >= high else "")
+        est = f" (≈£{j['est']:.0f}/h)" if j.get("est") else ""
+        lines.append(f"💷 {esc(j['salary'])}{est}{flag}")
     if j["url"]:
         lines.append(f'🔗 <a href="{html.escape(j["url"], quote=True)}">Відкрити вакансію</a>')
     return "\n".join(lines)
@@ -275,32 +313,64 @@ def send(text: str) -> bool:
     return False
 
 
-def post_jobs(jobs: list[dict], cfg: dict) -> list[dict]:
-    """Надсилає вакансії пачками. Повертає ті, що точно надіслано."""
-    sent, batch, batch_jobs, size = [], [], [], 0
-    today = datetime.now().strftime("%d %b")
-    header = f"📋 <b>QuickJobs · {today}</b> · нових: {len(jobs)}\n"
+def build_summary(by: dict, cats: list, jobs: list[dict], cfg: dict, remaining: int) -> str:
+    prio = cfg.get("salary", {}).get("priority_from", 15)
+    lines = [f"📋 <b>QuickJobs · {datetime.now().strftime('%d %b')}</b>", ""]
+    for name, emoji, title in cats:
+        lines.append(f"{emoji} <b>{esc(title)}</b>")
+        lines.append(plural_jobs(len(by.get(name, []))))
+    n_high = sum(1 for j in jobs if j["top"])
+    lines.append("💰 <b>HIGH PAY</b>")
+    lines.append(plural_jobs(n_high, new=False) + (f" від £{prio}/год · позначені 🔥" if n_high else ""))
+    if remaining:
+        lines += ["", f"➕ Ще {remaining} - покажу в наступному запуску"]
+    return "\n".join(lines)
+
+
+def post_jobs(jobs: list[dict], cfg: dict, remaining: int = 0) -> list[dict]:
+    """Надсилає підсумок, потім вакансії за категоріями. Повертає ті, що точно надіслано."""
+    cats = category_list(cfg)
+    by: dict[str, list[dict]] = {}
+    for j in jobs:
+        by.setdefault(j["agent"], []).append(j)
+
+    if not send(build_summary(by, cats, jobs, cfg, remaining)):
+        return []  # без підсумку нічого не позначаємо як надіслане - завтра спробуємо знову
+    time.sleep(1)
+
+    sent: list[dict] = []
+    msg: list[str] = []
+    msg_jobs: list[dict] = []
+    size = 0
 
     def flush():
-        nonlocal batch, batch_jobs, size
-        if not batch:
-            return
-        text = (header + "\n" if not sent and not flushed[0] else "") + "\n\n".join(batch)
-        flushed[0] = True
-        if send(text):
-            sent.extend(batch_jobs)
-        batch, batch_jobs, size = [], [], 0
+        nonlocal msg, msg_jobs, size
+        if msg and send("\n\n".join(msg)):
+            sent.extend(msg_jobs)
+        msg, msg_jobs, size = [], [], 0
         time.sleep(1)
 
-    flushed = [False]
-    for j in jobs:
-        block = format_job(j, cfg)
-        if size + len(block) > 3500 or len(batch) >= 8:
-            flush()
-        batch.append(block)
-        batch_jobs.append(j)
-        size += len(block) + 2
-    flush()
+    for name, emoji, title in cats:
+        items = by.get(name, [])
+        if not items:
+            continue
+        head = f"{emoji} <b>{esc(title)}</b> · {len(items)}"
+        head_open = False
+        for j in items:
+            block = format_job(j, cfg)
+            extra = len(block) + 2 + (0 if head_open else len(head) + 2)
+            if msg and size + extra > 3500:
+                flush()
+                head, head_open = f"{emoji} <b>{esc(title)}</b> (далі)", False
+                extra = len(block) + len(head) + 4
+            if not head_open:
+                msg.append(head)
+                head_open = True
+            msg.append(block)
+            msg_jobs.append(j)
+            size += extra
+        # між категоріями - окреме повідомлення, щоб читалося як розділи
+        flush()
     return sent
 
 
@@ -337,7 +407,7 @@ def main():
         return
 
     to_send = jobs[:MAX_PER_RUN]
-    sent = post_jobs(to_send, cfg)
+    sent = post_jobs(to_send, cfg, len(jobs) - len(to_send))
     now = datetime.now(timezone.utc).isoformat()
     for j in sent:
         seen[j["fp"]] = now
