@@ -26,20 +26,34 @@ exclude_keywords:
   - cook
   - kitchen porter
   - volunteer
-  - funeral
-  - delivery
-  - driver
-  - book keeper
-  - bookkeeper
-  - english teacher
-  - payroll manager
-  - paid emails
-  - cashback
 
 agents:
 
+  tech:
+    enabled: true
+    emoji: "💻"
+    title: "TECH"
+    radius_miles: 15        # для технічних вакансій шукаємо ширше
+    remote: true            # плюс окремий пошук віддалених вакансій по всій Британії
+    keywords:
+      - website administrator
+      - web administrator
+      - website manager
+      - wordpress
+      - shopify
+      - ppc specialist
+      - ppc executive
+      - google ads
+      - paid media
+      - paid social
+      - seo executive
+      - digital marketing assistant
+      - ecommerce assistant
+
   shops:
     enabled: true
+    emoji: "🛒"
+    title: "SUPERMARKETS"
 
     keywords:
       - customer assistant
@@ -65,6 +79,8 @@ agents:
 
   premium_retail:
     enabled: true
+    emoji: "🏬"
+    title: "RETAIL"
 
     keywords:
       - sales assistant
@@ -89,6 +105,8 @@ agents:
 
   cafe_restaurants:
     enabled: true
+    emoji: "☕"
+    title: "COFFEE"
 
     keywords:
       - barista
@@ -106,6 +124,8 @@ agents:
 
   warehouse:
     enabled: true
+    emoji: "📦"
+    title: "WAREHOUSE"
 
     keywords:
       - stock assistant
@@ -116,6 +136,8 @@ agents:
 
   easy_jobs:
     enabled: true
+    emoji: "🎬"
+    title: "EASY JOBS"
 
     keywords:
       - receptionist
