@@ -18,6 +18,7 @@ exclude_keywords:
   - cleaning
   - carer
   - care assistant
+  - care home
   - support worker
   - healthcare assistant
   - chef
@@ -26,6 +27,24 @@ exclude_keywords:
   - cook
   - kitchen porter
   - volunteer
+  - funeral
+  - delivery
+  - driver
+  - book keeper
+  - bookkeeper
+  - english teacher
+  - payroll manager
+  - paid emails
+  - cashback
+  - mortgage
+  - broker
+  - copywriter
+  - safeguarding
+  - nurse
+  - computer technician
+  - hr specialist
+  - paid emails
+  - no experience required
 
 agents:
 
@@ -49,6 +68,7 @@ agents:
       - seo executive
       - digital marketing assistant
       - ecommerce assistant
+      - ecommerce
 
   shops:
     enabled: true
