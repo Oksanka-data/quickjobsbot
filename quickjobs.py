@@ -1,8 +1,8 @@
-"""QuickJobs: щоденна добірка вакансій (Adzuna + Reed) у Telegram-канал.
+"""QuickJobs: щоденна добірка вакансій (Reed, Jooble, Adzuna) у Telegram-канал.
 
 Налаштування беруться з config.yaml, секрети - зі змінних середовища:
-BOT_TOKEN, CHAT_ID, ADZUNA_APP_ID, ADZUNA_APP_KEY, REED_API_KEY.
-Достатньо мати ключі хоча б одного з джерел (Adzuna або Reed).
+BOT_TOKEN, CHAT_ID, REED_API_KEY, JOOBLE_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY.
+Достатньо мати ключ хоча б одного з джерел; джерела без ключа пропускаються.
 DRY_RUN=1 - лише показати результат у логу, нічого не надсилати.
 """
 import html
@@ -26,6 +26,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 ADZUNA_ID = os.getenv("ADZUNA_APP_ID")
 ADZUNA_KEY = os.getenv("ADZUNA_APP_KEY")
 REED_KEY = os.getenv("REED_API_KEY")
+JOOBLE_KEY = os.getenv("JOOBLE_API_KEY")
 DRY_RUN = os.getenv("DRY_RUN") == "1"
 
 MAX_PER_RUN = int(os.getenv("MAX_PER_RUN", "25"))  # скільки вакансій максимум за один запуск
@@ -91,6 +92,23 @@ def salary_info(lo, hi, predicted, title, snippet):
             est = top / 1950 if top <= 200000 else None
             return None, f"{rng}/yr", est
         return None, rng, None  # незрозуміла одиниця (наприклад, ставка за день)
+    return None, "", None
+
+
+SAL_NUM_RE = re.compile(r"£\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(\s*k\b)?", re.I)
+
+
+def salary_from_text(raw: str, title: str, snippet: str):
+    """Зарплата, записана рядком ("£12 - £14 per hour", "£25,000 a year"). Повертає як salary_info."""
+    hourly = parse_hourly(raw, title, snippet)
+    if hourly is not None:
+        return hourly, f"£{hourly:.2f}/h".replace(".00/h", "/h"), None
+    nums = []
+    for m in SAL_NUM_RE.finditer(raw or ""):
+        value = float(m.group(1).replace(",", ""))
+        nums.append(value * 1000 if m.group(2) else value)
+    if nums:
+        return salary_info(min(nums), max(nums), False, "", "")
     return None, "", None
 
 
@@ -170,6 +188,49 @@ def fetch_reed(keyword: str, cfg: dict, agent: dict, remote: bool = False) -> li
     return jobs
 
 
+def fetch_jooble(keyword: str, cfg: dict, agent: dict, remote: bool = False) -> list[dict]:
+    """Jooble API: POST https://jooble.org/api/<ключ> з JSON-тілом."""
+    loc = cfg["location"]
+    radius = agent.get("radius_miles", loc.get("radius_miles", 5))
+    part_time = "part-time" in [e.lower() for e in cfg.get("employment", [])]
+    body = {"keywords": f"{keyword}{' remote' if remote else ''}{' part time' if part_time else ''}", "page": "1"}
+    if not remote:
+        body["location"] = loc["home"]
+        body["radius"] = str(max(1, round(radius * 1.609)))  # Jooble: кілометри
+    r = requests.post(f"https://jooble.org/api/{JOOBLE_KEY}", json=body, timeout=TIMEOUT)
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, dict) or "jobs" not in data:
+        log(f"  ! Jooble: неочікувана відповідь (ключі: {list(data)[:5] if isinstance(data, dict) else type(data).__name__})")
+        return []
+    jobs = []
+    for j in data["jobs"]:
+        title, snippet = clean(j.get("title")), clean(j.get("snippet"))
+        link = j.get("link", "")
+        hourly, sal, est = salary_from_text(clean(j.get("salary")), title, snippet)
+        posted = None
+        try:
+            posted = datetime.fromisoformat(str(j["updated"])[:19]).replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+        jobs.append({
+            "key": f"jooble:{j.get('id') or abs(hash(link))}", "title": title,
+            "company": clean(j.get("company")), "location": clean(j.get("location")),
+            "url": link, "hourly": hourly, "est": est, "salary": sal,
+            "posted": posted, "snippet": snippet,
+        })
+    return jobs
+
+
+def title_ok(title: str, agent: dict) -> bool:
+    """Додатковий фільтр за назвою посади для конкретної категорії (title_match / title_exclude у config.yaml)."""
+    t = norm_words(title)
+    match = agent.get("title_match")
+    if match and not any(norm_words(w) in t for w in match):
+        return False
+    return not any(norm_words(w) in t for w in agent.get("title_exclude", []))
+
+
 def remote_ok(job: dict) -> bool:
     blob = norm_words(" ".join([job["title"], job["location"], job.get("snippet", "")]))
     return any(w in blob for w in REMOTE_WORDS)
@@ -181,13 +242,20 @@ def collect(cfg: dict) -> list[dict]:
     brands = {n: [norm_words(c) for c in a.get("companies", [])] for n, a in agents.items()}
     all_brands = [b for lst in brands.values() for b in lst]
 
+    sources = [f for f, key in (
+        (fetch_reed, REED_KEY), (fetch_jooble, JOOBLE_KEY), (fetch_adzuna, ADZUNA_ID and ADZUNA_KEY),
+    ) if key]
+    if not sources:
+        raise SystemExit("Немає жодного ключа джерела. Додайте REED_API_KEY і/або JOOBLE_API_KEY у GitHub Secrets.")
+    log("Джерела: " + ", ".join(f.__name__.replace("fetch_", "") for f in sources))
+
     found: dict[str, dict] = {}
     calls = errors = 0
     for name, agent in agents.items():
         modes = [False] + ([True] if agent.get("remote") else [])  # remote: додатковий пошук без прив'язки до району
         for keyword in agent.get("keywords", []):
             for remote in modes:
-                for fetch in (fetch_adzuna, fetch_reed):
+                for fetch in sources:
                     try:
                         jobs = fetch(keyword, cfg, agent, remote)
                     except Exception as e:  # не друкуємо текст помилки: у ньому може бути URL із ключем
@@ -199,6 +267,8 @@ def collect(cfg: dict) -> list[dict]:
                         calls += 1
                     time.sleep(0.3)
                     for job in jobs:
+                        if not title_ok(job["title"], agent):
+                            continue  # не підходить цій категорії - може підійти іншій
                         is_remote = remote_ok(job)
                         if remote and not is_remote:
                             continue  # у remote-пошуку лишаємо тільки справжній віддалений формат
@@ -215,7 +285,7 @@ def collect(cfg: dict) -> list[dict]:
                         found[fp] = job
     log(f"Запитів виконано: {calls}, помилок: {errors}, унікальних вакансій: {len(found)}")
     if calls == 0:
-        raise SystemExit("Жодне джерело не відповіло. Перевірте ключі ADZUNA_* / REED_API_KEY у Secrets.")
+        raise SystemExit("Жодне джерело не відповіло. Перевірте ключі в GitHub Secrets.")
     return list(found.values())
 
 
