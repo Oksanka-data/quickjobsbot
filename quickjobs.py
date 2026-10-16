@@ -231,6 +231,44 @@ def title_ok(title: str, agent: dict) -> bool:
     return not any(norm_words(w) in t for w in agent.get("title_exclude", []))
 
 
+US_STATES = ("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC "
+             "ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC").split()
+US_STATE_RE = re.compile(r",\s*(?:" + "|".join(US_STATES) + r")\b")  # "New York, NY", "Austin, TX"
+UK_WORDS_RE = re.compile(
+    r"\b(?:uk|u\.k\.|united kingdom|great britain|britain|england|scotland|wales|northern ireland|london)\b", re.I)
+UK_POSTCODE_RE = re.compile(r"\b[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}\b")
+
+# Значення за замовчуванням, якщо в config.yaml немає exclude_locations / exclude_text
+DEFAULT_EXCLUDE_LOCATIONS = [
+    "united states", "usa", "canada", "australia", "india", "philippines",
+    "new york", "california", "texas", "florida", "illinois", "massachusetts",
+]
+DEFAULT_EXCLUDE_TEXT = [
+    "us only", "usa only", "us based", "united states only", "must be located in the us",
+    "authorized to work in the us", "authorised to work in the us", "eligible to work in the us",
+    "us citizen", "us citizens", "u.s. citizen", "us work authorization", "local presence",
+]
+
+
+def is_foreign(job: dict, cfg: dict) -> bool:
+    """Вакансія з-за кордону (США тощо) або з вимогою жити/працювати в іншій країні."""
+    loc_raw = job["location"] or ""
+    if US_STATE_RE.search(loc_raw):
+        return True
+    loc = norm_words(loc_raw)
+    if " us " in loc:  # "Remote, US"
+        return True
+    if any(norm_words(p) in loc for p in cfg.get("exclude_locations", DEFAULT_EXCLUDE_LOCATIONS)):
+        return True
+    blob = norm_words(f"{job['title']} {job.get('snippet', '')}")
+    return any(norm_words(t) in blob for t in cfg.get("exclude_text", DEFAULT_EXCLUDE_TEXT))
+
+
+def uk_signal(job: dict) -> bool:
+    blob = f"{job['location']} {job['title']} {job.get('snippet', '')}"
+    return bool(UK_WORDS_RE.search(blob) or UK_POSTCODE_RE.search(blob))
+
+
 def remote_ok(job: dict) -> bool:
     blob = norm_words(" ".join([job["title"], job["location"], job.get("snippet", "")]))
     return any(w in blob for w in REMOTE_WORDS)
@@ -250,7 +288,7 @@ def collect(cfg: dict) -> list[dict]:
     log("Джерела: " + ", ".join(f.__name__.replace("fetch_", "") for f in sources))
 
     found: dict[str, dict] = {}
-    calls = errors = 0
+    calls = errors = foreign = 0
     for name, agent in agents.items():
         modes = [False] + ([True] if agent.get("remote") else [])  # remote: додатковий пошук без прив'язки до району
         for keyword in agent.get("keywords", []):
@@ -272,6 +310,12 @@ def collect(cfg: dict) -> list[dict]:
                         is_remote = remote_ok(job)
                         if remote and not is_remote:
                             continue  # у remote-пошуку лишаємо тільки справжній віддалений формат
+                        if is_foreign(job, cfg):
+                            foreign += 1
+                            continue  # США та інші країни
+                        if remote and job["key"].startswith("jooble:") and not uk_signal(job):
+                            foreign += 1
+                            continue  # Jooble глобальний: "remote" без ознак Великої Британії = ймовірно не для вас
                         fp = fingerprint(job)
                         if fp in found:
                             found[fp]["keys"].add(job["key"])
@@ -283,7 +327,7 @@ def collect(cfg: dict) -> list[dict]:
                         company_n = norm_words(job["company"])
                         job["brand"] = any(b in company_n for b in all_brands)
                         found[fp] = job
-    log(f"Запитів виконано: {calls}, помилок: {errors}, унікальних вакансій: {len(found)}")
+    log(f"Запитів виконано: {calls}, помилок: {errors}, унікальних вакансій: {len(found)}, відсіяно як не-UK: {foreign}")
     if calls == 0:
         raise SystemExit("Жодне джерело не відповіло. Перевірте ключі в GitHub Secrets.")
     return list(found.values())
