@@ -140,6 +140,11 @@ agents:
       - checkout assistant
       - customer advisor
       - store colleague
+      - store assistant
+      - checkout operator
+      - till operator
+      - customer team member
+      - customer service assistant
  
     companies:
       - tesco
