@@ -45,8 +45,40 @@ exclude_keywords:
   - paid emails
   - no experience required
 
+# Вакансії зі США та інших країн відсіюються (особливо з Jooble: "remote" часто означає "лише США").
+# Перевіряється поле "місце" (exclude_locations) і назва/опис вакансії (exclude_text).
+# Окремо: віддалені вакансії з Jooble показуються, лише якщо в них згадано UK/England/London або британський поштовий індекс.
+exclude_locations:
+  - united states
+  - usa
+  - canada
+  - australia
+  - india
+  - philippines
+  - new york
+  - california
+  - texas
+  - florida
+  - illinois
+  - massachusetts
+ 
+exclude_text:
+  - us only
+  - usa only
+  - us based
+  - united states only
+  - must be located in the us
+  - authorized to work in the us
+  - authorised to work in the us
+  - eligible to work in the us
+  - us citizen
+  - us citizens
+  - u.s. citizen
+  - us work authorization
+  - local presence
+ 
 agents:
-
+ 
   tech:
     enabled: true
     emoji: "💻"
@@ -94,12 +126,12 @@ agents:
       - seo executive
       - digital marketing assistant
       - ecommerce assistant
-
+ 
   shops:
     enabled: true
     emoji: "🛒"
     title: "SUPERMARKETS"
-
+ 
     keywords:
       - customer assistant
       - sales assistant
@@ -108,7 +140,7 @@ agents:
       - checkout assistant
       - customer advisor
       - store colleague
-
+ 
     companies:
       - tesco
       - sainsburys
@@ -121,19 +153,19 @@ agents:
       - boots
       - superdrug
       - whsmith
-
+ 
   premium_retail:
     enabled: true
     emoji: "🏬"
     title: "RETAIL"
-
+ 
     keywords:
       - sales assistant
       - sales associate
       - client advisor
       - brand ambassador
       - retail assistant
-
+ 
     companies:
       - uniqlo
       - zara
@@ -147,18 +179,18 @@ agents:
       - levi's
       - kurt geiger
       - apple
-
+ 
   cafe_restaurants:
     enabled: true
     emoji: "☕"
     title: "COFFEE"
-
+ 
     keywords:
       - barista
       - team member
       - front of house
       - counter assistant
-
+ 
     companies:
       - costa
       - starbucks
@@ -166,24 +198,24 @@ agents:
       - pret
       - gails
       - black sheep
-
+ 
   warehouse:
     enabled: true
     emoji: "📦"
     title: "WAREHOUSE"
-
+ 
     keywords:
       - stock assistant
       - stockroom assistant
       - picker
       - packer
       - fulfilment assistant
-
+ 
   easy_jobs:
     enabled: true
     emoji: "🎬"
     title: "EASY JOBS"
-
+ 
     keywords:
       - receptionist
       - cinema assistant
@@ -191,3 +223,5 @@ agents:
       - leisure assistant
       - front desk
       - library assistant
+ 
+
